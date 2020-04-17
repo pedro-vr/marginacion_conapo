@@ -1,0 +1,196 @@
+---
+title: "Índice de marginación (CONAPO)"
+author: "Pedro Alan Velázquez Romero"
+date: "4/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introducción
+
+La CONAPO (Comisión Nacional de Población) es un conszejo gubernamental cuya misión es la planeación demográfica del país a fin de incluir a la población en los programas de desarrollo económico y social que se formulen dentro del sector gubernamental y vincular sus objetivos a las necesidades que plantean los fenómenos demográficos. Una de sus funciones es medir el índice de marginación del país cada 5 años a partir de 1990. El conjunto de datos se puede descargar [aquí](http://www.conapo.gob.mx/es/CONAPO/Datos_Abiertos_del_Indice_de_Marginacion).
+
+Una pregunta interesante sería saber si podemos lograr hacer un algoritmo en el cual podamos clasificar los municipios según ciertos criterios, ya sea especificados por la misma CONAPO, o, por alguna otra persona que quiera realizar investigación acerca de esto. La ventaja que nos podría dar la agrupación sería un manejo más fácil de los datos en un futuro o poder hacer inferencia para poder llegar a hacer incluso políticas públicas, económicas, etc.
+
+Para empezar, se cuenta con una base de datos con la versión del año 1990 con un total de 2403 instancias o “muestras”, a partir de aquí, para poder hacer más amigables las resoluciones gráficas y manejar más fácil la información, se tomó una muestra de 800 datos tomando la semilla 156113.
+
+```{r,include=FALSE}
+# install.packages(c("dplyr","ggplot2","reshape2","devtools","tidyverse","MASS","klaR"))
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(devtools)
+#install_github("kassambara/easyGgplot2")
+library(easyGgplot2)
+#install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(tidyverse)
+library(MASS)
+library(klaR)
+library(cluster)
+library(factoextra)
+#library(NbClust)
+#install.packages("factoextra")
+```
+
+Primero leamos el archivo y veamos una vista rápida del conjunto de datos.
+
+```{r}
+#leemos el archivo
+marginacion <- read.csv("/Users/pedrovela/Downloads/marginacion_conapo/1990marginacion.csv")
+summary(marginacion)
+```
+
+El conjunto de datos se compone de 18 variables y 1403 observaciones. La descripción de las variables viene en un archivo pdf. Ahora, ponemos la semilla y obtenemos la muestra de 800 datos. Aquí, la variable de interés es GM en el cual se registra el grado de marginación medida por la CONAPO con el valor alto, bajo, medio, muy alto y muy bajo.
+
+```{r}
+set.seed(156113)
+marg <- sample_n(marginacion,800)
+```
+
+Ahora, lo que nos proponemos hacer es un análisis exploratorio en donde podramos obtener una descripción de los datos y, por otro lado, un análisis predictivo con el fin de poder predecir que grado de marginación obtendrá alguna entidad federativa del país con base en algunas variables cuantitativas.
+
+## Análisis exploratorio
+
+Para empezar, observemos la frecuencia de los datos en cuanto al grado de marginación. 
+
+```{r}
+(counts_local <- table(marg$GM))
+barplot(counts_local)
+```
+De aquí vemos que la mayoría de las entidades tienen grado alto de marginación (para ser exactos 275 entidades tienen este índice) y el segundo grado con más frecuencia es bajo con 221. Un resultado interesante acerca de esta primera vista es que los grados "extremos", es decir, muy altos y muy bajos, son los que presentan menos frecuencia de entidades con 99 y 45 respectivamente, esto nos dice que en todo el país casi no hay entidades federativas que vivan en situaciones extremas, es decir, no somos un país "extremo".
+
+Ahora, analizaremos las características de estos niveles de marginación con respecto a algunas variables cuantitativas. Para empezar, analizaremos las variables ANALF y SPRIM las cuales miden el porcentaje de población de 15 años o más analfabeta y el porcentaje de población de 15 años o más sin primaria completa respectivamente. Se escogieron estas variables porque podemos pensar que están muy correlacionadas.
+
+```{r}
+indice_marginacion <- as.factor(marg$GM)
+ggplot(marg, aes(SPRIM, ANALF, shape=indice_marginacion,color=indice_marginacion)) + geom_point()
+```
+
+Al ver la gráfica vemos que hay dos grados de marginación que se separan de los demás, muy bajo y muy alto, para el caso del grado muy bajo vemos que presenta niveles muy bajos tanto de analfabetismo y de primaria trunca, mientras que el grado muy alto presenta niveles muy altos de analfabetismo y de primaria trunca. Esto solo nos confirma lo que hubiésemos pensado con el sentido común, que entidades con marginación muy alta tienen niveles de educación muy bajas o nulas, mientras que aquellas entidades con muy poca marginación presentan niveles educativos altos. 
+
+Los otros grados de marginación parecen estar muy entre mnezclados y parace que no hay una separación clara entre ellos, lo cual nos hace pensar que podríamos dividir los datos en tres grupos excluyentes entre sí. Al final podemos ver que si existe una correlación positiva entre ambas variables, es decir, mientras más primaria trunca haya, más analfabetismo resulta.
+
+Ahora haremos un análisis parecido pero ahora con las variables PO2SM y VHAC las cuales miden el porcentaje de población ocupada con ingresos de hasta 2 salarios mínimos y el porcentaje de viviendas con algún nivel de hacinamiento respectivamente, estas variables parecen estar igualmente correlacionadas.
+
+```{r}
+ggplot(marg, aes(PO2SM, VHAC, shape=indice_marginacion,color=indice_marginacion)) + geom_point()
+```
+
+Primero, vemos que al parecer si existe una correlación posirtiva entre las variables, es decir, entre más gente hay con hasta dos salarios mínimos, más niveles de hacinamiento presenta. Después, vemos que prácticamente todos los grados están entre mezclados, solo parece que los grados muy bajo y bajo son los que despegan al presentar niveles más bajos hacinamiento y de personas con hasta 2 salarios mínimos, lo cual, a su vez, coincide una vez más con el sentido común al pensar que aquellas entidades con niveles muy bajas de marginación son las que ganan más dinero y por lo tanto pueden comprar casas más grandes y evitar el hacinamiento. 
+
+Hasta ahora, hemos detectado ya algunas características de los grados de marginación con base en algunas variables cuantitativas, por ejemplo, que el grado muy bajo de marginación presenta niveles bajos de hacinamiento, analafabetismo, primaria trunca y salario bajo; de aquí podemos empezar ya a clasificar entidades nuevas si es que detectamos este tipo de niveles en sus variables. 
+
+Ahora, empezaremos con análisis estadístico un poco más complejo, para ser exactos, empezaremos con un análisis de clasificación para ver si es que podemos separar los datos en $k$ grupos diferentes con una separación lo más exacta posible; después haremos un análisis de tipo predictivo mediante un análisis de discriminante lineal.
+
+## Clusterización 
+
+Este análisis se hará mediante las técnicas PCA y KMEANS. La razón por la que se eligieron ambas técnicas es que, por un lado, PCA te ayuda bastante a reducir la dimensión de tu problema a solo en aquellas componentes que logren explicar la mayor cantidad de varianza de todo tu conjunto de datos, y en este caso es muy útil ya que contamos con doce variables cuantitativas y eso nos orillaría a trabajar en dimensión doce que es bastante difícil para trabajar; por otro lado, la razón por la que utilizaremos kmeans es que es una técnica muy usada y muy fácil de implementar a una base de datos, además de que, desde una vez que tienes tus grupos con respectivos centroides que minimizan la varianza “intra-grupal”, ya es muy fácil llegar a clasififcar un dato “nuevo” en cualquiera de los grupos que creaste. 
+
+La estrategia por realizar es la siguiente: primero se desechan las variables que no sean cuantitativas para después a escalar las variables para que la información se presente de una manera más limpia. Después, se decidió que se haría pca, esto porque queremos disminuir la dimensión de nuestros datos tomando las componentes con mayor varianza explicativa y para posteriormente formar los grupos como tal.
+
+Para empezar, con la ayuda de la función *fviz_nbclust* de *R* obtenemos el número óptimo de clusters mediante la "técnica del codo".
+
+```{r,include=FALSE}
+#Desechamos las variables cualitativas
+marg.num <- marg[,c(-1,-2,-15,-18,-17,-3,-4,-16)]
+```
+```{r}
+#Quitamos la columna de las clases y escalamos las variables
+marg.scaled <- scale(marg[,c(-1,-2,-15,-18,-17,-3,-4,-16)])
+#Hacemos la gráfica donde vemos el número óptimo de clusters
+fviz_nbclust(marg.scaled, kmeans, method = "wss") + geom_vline(xintercept = 3, linetype = 2)
+```
+
+De esta gráfica vemos que el número óptimo den clusters es 3 (algo que habíamos previsto desde el análisis exploratorio). Procedemos a hacer PCA:
+
+```{r}
+#Corremos la función
+marg.pca <- prcomp(marg.num,center = TRUE,scale. = TRUE)
+summary(marg.pca)
+#Ploteamos
+fviz_eig(marg.pca)
+```
+
+Del primer resultado del análisis por componentes principales vemos que ya con las primeras dos componentes principales explicamos prácticamente el 75% de la variación de los datos y ya con las tres primeras componentes ya explicamos el 80%, es decir, ya con muy pocas dimensiones podemos explicar bastante bien al conjunto de datos. Pero echemos un vistazo qué valores exactamente presentan las dos primeras componentes principales:
+
+```{r}
+marg.pca
+```
+
+Aquí vemos que, por ejemplo, en la combinación lineal para PC1, se tienen valores positivos de las constantes de las variables y son similares entre ellas, entonces, aquellas entidades que pertenezcan a la primera componente presentan valores altos de las variables y positivas, una forma más de clasificar a los datos. Ahora veamos las gráficas de los datos para representar estos números.
+
+```{r}
+ggbiplot(marg.pca,ellipse = FALSE,groups = marg$GM)
+```
+
+Después del análisis PCA nos damos cuenta de que ya los grados de marginación parecen estar perfectamente separados respecto a las primeras dos componentes principales. Por ejemplo, el grado muy alto de marginación tiene valores muy altos de PC1 y PC2 mientras que el grado muy bajo de marginación tiene niveles muy bajos de PC1 y altos de PC2, algo que nos sirve para clasificación de nuevas entidades. Ahora, con base en este análisis, haremos kmeans con tres grupos (que resultaron ser los óptimos) para ver si podemos obtener una sepración perfecta.
+
+```{r}
+#Corremos kmeans
+km.marg <- kmeans(marg.pca$x[,1:2],3,nstart = 10)
+#Generamos gráficas de elipses con los grupos establecidos
+fviz_cluster(km.marg, marg.num)
+```
+
+Ya con los dos componentes principales obtenemos una separación en 3 grupos prácticamente perfecta, podemos discernir muy bien la separación entre grupos y así identificar tres grados de marginación y no cinco como al principio lo planteó la CONAPO. De aquí vemos, por ejemplo, que aquellas entidades que presentan valores altos tanto de PC1 como de PC2 pertenecen al grupo 3, mientras que aquellos que presentan niveles bajos de PC1 y medios de PC2 pertenecen al grupo 2, el grupo 1 tiene valores medios tanto de PC1 y PC2. Aquí, ya encontramos una clasificación de las entidades federativas según los valores de sus variables y así asignarles un grado de marginación a cada uno. 
+
+## Análisis predictivo
+
+Finalmente, empezaremos con el análisis predictivo, para esto se tomará la técnica de LDA (Linear Discriminant Analysis), se decidió hacerlo con esta técnica ya que este método explica bastante bien la relación que tienen las variables independientes con la variable dependiente (en este caso es el grado de marginación). Para esto, empezaremos separando nuestros datos en dos conjuntos: el conjunto de entrenamiento (train) el cual nos servirá para construir el modelo para así poder crear futuras predicciones; y el otro conjunto de prueba (test) que nos servirá para probar el modelo anteriormente entrenado y así poder verificar la precisión de nuestra predicción. Para este ejercicio hicimos una separación del 70% de los datos para el conjunto de entrenamiento y de un 30% para el conjunto de prueba.
+
+```{r}
+#Empezamos a dividir los archivos en train y test
+marg.grado <- marg[,c(-1,-2,-16,-18,-17,-3,-4,-14)]
+training_sample_marg <- sample(c(TRUE, FALSE), nrow(marg.grado), replace = T, prob = c(0.7,0.3))
+marg.train <- marg.grado[training_sample_marg, ]
+marg.test <- marg.grado[!training_sample_marg, ]
+```
+
+Empezaremos a correr la función LDA
+
+```{r}
+#Corremos lda
+marg.lda <- lda(marg.train$GM ~ ., marg.train)
+marg.lda #show results
+```
+
+En este primer resultado vemos, en primera instancia, que tenemos aproximadamente un 35.8% de probabilidad de escoger aleatoriamente una entidad federativa con grado de marginación alto, mientras que solo hay aproximadamente un 5.3% de probabilidad de esocger aleatoriamente una entidad con grado de marginación muy bajo. Después vemos los valores de las constantes de los discriminantes lineales con respecto a las variables cuantitativas para poder hacer la predicción. Ahora, ya armado el modelo, empezaremos a predecir con el conjunto de prueba.
+
+La matriz de confusión resultante es la siguiente:
+
+```{r}
+#Predecimos con test
+marg.lda.test <- predict(marg.lda,marg.test)
+marg.test$lda <- marg.lda.test$class
+(matriz <- table(marg.test$lda,marg.test$GM))
+```
+
+```{r,include=FALSE}
+alto <- round(matriz[1,1]/(matriz[1,1] + matriz[1,2] + matriz[1,3] + matriz[1,4] + matriz[1,5])*100,2)
+bajo <- round(matriz[2,2]/(matriz[2,1] + matriz[2,2] + matriz[2,3] + matriz[2,4] + matriz[2,5])*100,2)
+medio <- round(matriz[3,3]/(matriz[3,1] + matriz[3,2] + matriz[3,3] + matriz[3,4] + matriz[3,5])*100,2)
+muy_alto <- round(matriz[4,4]/(matriz[4,1] + matriz[4,2] + matriz[4,3] + matriz[4,4] + matriz[4,5])*100,2)
+muy_bajo <- round(matriz[5,5]/(matriz[5,1] + matriz[5,2] + matriz[5,3] + matriz[5,4] + matriz[5,5])*100,2)
+promedio <- round((alto+bajo+medio+muy_alto+muy_bajo)/5,2)
+```
+
+
+Los resultados que obtuvimos son muy buenos, ya que, a simple vista, podemos ver que hay pocos valores fuera de la diagonal de la matriz, la cual nos indica que hubo poquitas entidades a las cuales les asignamos un grado de marginación erróneo. Para ser más precisos, los porcentajes de precisión (aproximados) para cada grado de marginación son los siguientes:
+
+- Alto: `r alto`%
+- Bajo: `r bajo`%
+- Medio: `r medio`%
+- Muy alto: `r muy_alto`%
+- Muy bajo: `r muy_bajo`%
+
+Con esto, obtuvimos una precisión promedio (aproximado) del `r promedio`% lo cual es bastante bueno y podemos decir que nuestro modelo predice muy bien el grado de marginación de una entidad federativa del país.
+
+## Conclusión
+
+Después de un análisis de los datos pudimos identificar algunas características principales de los grados de marginación para clasificación de los datos. También identificamos que podemos, mediante PCA y kmeans, hacer tres grupos de los datos "perfectos" en el sentido de que cada grupo es independiente del otro y se pueden separar mediante una línea recta. Con estos dos atributos podemos clasificar nuevas entidades federativas en algún grado de marginación según los datos de sus variables cuantitativas.
+
+Al final, realizamos un análisis predictivo mediante la técnica del discriminante lineal con el fin de crear un modelo que nos permita predecir el grado de marginación de una entidad nueva basada en los valores de sus variables cuantitativas. El modelo resultante fue un modelo con una precisión promedio cercana al 90% lo cual nos dice que es un modelo muy bueno y se podría utilizar para futuros datos. 
